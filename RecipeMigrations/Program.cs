@@ -24,10 +24,11 @@ namespace RecipeMigrations
         /// </summary>
         private static IServiceProvider CreateServices()
         {
-            //IConfiguration config = new ConfigurationBuilder()
-              //.AddJsonFile("appsettings.json")
-               //AddEnvironmentVariables()
-               //.Build();
+            var builder = new ConfigurationBuilder()
+               .SetBasePath(Directory.GetCurrentDirectory())
+               .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+            IConfigurationRoot configuration = builder.Build();
+
             return new ServiceCollection()
                        // Add common FluentMigrator services
                        .AddFluentMigratorCore()
@@ -35,12 +36,12 @@ namespace RecipeMigrations
                        // Add Postgres support to FluentMigrator
                        .AddPostgres()
                        // Set the connection string 
-                      .WithGlobalConnectionString("Server=localhost;Database=recipe_app;User ID=postgres;Password=user9507lh;")
+                      .WithGlobalConnectionString(configuration["ConnectionString"])
                        // Define the assembly containing the migrations.
                       .ScanIn(typeof(_0001_RecipeTable).Assembly).For.Migrations())
                       // Enable logging to console in the FluentMigrator way
-                      .AddLogging(lb => lb.AddFluentMigratorConsole())   //for logging
-                                                                         // Build the service provider
+                      .AddLogging(lb => lb.AddFluentMigratorConsole()) 
+                      // Build the service provider
                       .BuildServiceProvider(false);
         }
 
