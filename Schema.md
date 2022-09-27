@@ -41,4 +41,4 @@ Relationships:
 
 | Type | Tables involved 
 | --- | --- |
-| Many to Many | Recipes to Categories | 
+| Many to Many | recipe to category | 
