@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
@@ -8,8 +8,9 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <None Include="Code\DatabaseGeneric\DBFirst.csproj" />
-	  <None Include="Code\DatabaseSpecific\DBFirstDBSpecific.csproj" />
+	  <Compile Remove="Code\**" />
+	  <EmbeddedResource Remove="Code\**" />
+	  <None Remove="Code\**" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -22,21 +23,6 @@
 		<PackageReference Include="Microsoft.Extensions.Configuration.FileExtensions" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.0" />
 		<PackageReference Include="Npgsql" Version="6.0.7" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="Code\DatabaseGeneric\bin\Debug\net6.0\" />
-	  <Folder Include="Code\DatabaseGeneric\bin\Release\net6.0\" />
-	  <Folder Include="Code\DatabaseGeneric\obj\Debug\net6.0\refint\" />
-	  <Folder Include="Code\DatabaseGeneric\obj\Debug\net6.0\ref\" />
-	  <Folder Include="Code\DatabaseGeneric\obj\Release\net6.0\refint\" />
-	  <Folder Include="Code\DatabaseGeneric\obj\Release\net6.0\ref\" />
-	  <Folder Include="Code\DatabaseSpecific\bin\Debug\net6.0\" />
-	  <Folder Include="Code\DatabaseSpecific\bin\Release\net6.0\" />
-	  <Folder Include="Code\DatabaseSpecific\obj\Debug\net6.0\refint\" />
-	  <Folder Include="Code\DatabaseSpecific\obj\Debug\net6.0\ref\" />
-	  <Folder Include="Code\DatabaseSpecific\obj\Release\net6.0\refint\" />
-	  <Folder Include="Code\DatabaseSpecific\obj\Release\net6.0\ref\" />
 	</ItemGroup>
 
 </Project>
