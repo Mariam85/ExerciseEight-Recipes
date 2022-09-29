@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="6.0.7" />
+    <PackageReference Include="SD.LLBLGen.Pro.DQE.PostgreSql" Version="5.9.2" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.2.3" />
+    <PackageReference Include="System.Data.OleDb" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DatabaseGeneric\DBRecipes.csproj" />
+    <ProjectReference Include="..\DatabaseSpecific\DBRecipesDBSpecific.csproj" />
+  </ItemGroup>
+
+</Project>

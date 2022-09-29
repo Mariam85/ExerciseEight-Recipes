@@ -60,6 +60,7 @@ namespace RecipeMigrations.Seeds
         {
             foreach (var recipe in recipes)
             {
+
                 Insert.IntoTable("recipe")
                     .Row(new
                     {
