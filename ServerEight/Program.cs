@@ -395,45 +395,46 @@ app.MapPost("recipes/add-recipe", [Authorize] async (Recipe recipe) =>
             RecipeEntity newRecipe = new();
             newRecipe.IsActive = true;
             newRecipe.Title = recipe.Title;
-            adapter.SaveEntity(newRecipe);
 
             // Ingredients  to add to the ingredients table.
-            var ingredientsCollection = new EntityCollection<IngredientEntity>();
-            IngredientEntity ingredients = new();
             foreach (var ingredient in recipe.Ingredients)
             {
-                ingredients.RecipeId = newRecipe.Id;
-                ingredients.Component = ingredient;
-                ingredientsCollection.Add(ingredients);
+                var ingredientEntity = new IngredientEntity
+                {
+                    Component = ingredient,
+                    Recipe = newRecipe
+                };
             }
 
             // Instructions to add to the instructions table.
-            var instructionsCollection = new EntityCollection<InstructionEntity>();
-            InstructionEntity instructions = new();
             foreach (var instruction in recipe.Instructions)
             {
-                instructions.RecipeId = newRecipe.Id;
-                instructions.Step = instruction;
-                instructionsCollection.Add(instructions);
+                var instructionEntity = new InstructionEntity
+                {
+                    Step = instruction,
+                    Recipe = newRecipe
+                };
             }
 
             // Categories to add to the recipe_category table.
-            var categoryCollection = new EntityCollection<RecipeCategoryEntity>();
-            RecipeCategoryEntity categories = new();
             foreach (var category in recipe.Categories)
             {
-                categories.RecipeId = newRecipe.Id;
-                categories.CategoryName = category;
-                categoryCollection.Add(categories);
+                var categEntity = new RecipeCategoryEntity
+                {
+                    CategoryName = category,
+                    Recipe = newRecipe
+                };
             }
-            await adapter.SaveEntityCollectionAsync(ingredientsCollection);
-            await adapter.SaveEntityCollectionAsync(instructionsCollection);
-            await adapter.SaveEntityCollectionAsync(categoryCollection);
+
+            if (!await adapter.SaveEntityAsync(newRecipe))
+                throw new Exception();
+            adapter.Commit();
 
             return Results.Created("Successfully added a recipe", recipe);
         }
         catch (Exception e)
         {
+            adapter.Rollback();
             return Results.BadRequest(e.Message);
         }
     }
@@ -443,7 +444,6 @@ app.MapPost("recipes/add-recipe", [Authorize] async (Recipe recipe) =>
 // Editing a recipe.
 app.MapPut("recipes/edit-recipe/{id}", [Authorize] async (int id, Recipe editedRecipe) =>
 {
-    //search for recipe if not found,therefore return return Results.BadRequest();....
     using (var adapter = new DataAccessAdapter(connectionString))
     {
         try
@@ -485,37 +485,40 @@ app.MapPut("recipes/edit-recipe/{id}", [Authorize] async (int id, Recipe editedR
 
                 // Adding the new fields for the recipe.
                 // Ingredients  to add to the ingredients table.
-                var ingredientsCollection = new EntityCollection<IngredientEntity>();
-                IngredientEntity ingredients = new();
                 foreach (var ingredient in editedRecipe.Ingredients)
                 {
-                    ingredients.RecipeId = recipeFound.Id;
-                    ingredients.Component = ingredient;
-                    ingredientsCollection.Add(ingredients);
+                    var ingredientEntity = new IngredientEntity
+                    {
+                        Component = ingredient,
+                        Recipe = recipeFound
+                    };
                 }
 
                 // Instructions to add to the instructions table.
-                var instructionsCollection = new EntityCollection<InstructionEntity>();
-                InstructionEntity instructions = new();
                 foreach (var instruction in editedRecipe.Instructions)
                 {
-                    instructions.RecipeId = recipeFound.Id;
-                    instructions.Step = instruction;
-                    instructionsCollection.Add(instructions);
+                    var instructionEntity = new InstructionEntity
+                    {
+                        Step = instruction,
+                        Recipe = recipeFound
+                    };
                 }
 
                 // Categories to add to the recipe_category table.
-                var categoryCollection = new EntityCollection<RecipeCategoryEntity>();
-                RecipeCategoryEntity categories = new();
                 foreach (var category in editedRecipe.Categories)
                 {
-                    categories.RecipeId = recipeFound.Id;
-                    categories.CategoryName = category;
-                    categoryCollection.Add(categories);
+                    var categEntity = new RecipeCategoryEntity
+                    {
+                        CategoryName = category,
+                        Recipe = recipeFound
+                    };
                 }
-                await adapter.SaveEntityCollectionAsync(ingredientsCollection);
-                await adapter.SaveEntityCollectionAsync(instructionsCollection);
-                await adapter.SaveEntityCollectionAsync(categoryCollection);
+
+                if (!await adapter.SaveEntityAsync(recipeFound))
+                    throw new Exception();
+                adapter.Commit();
+
+                adapter.Rollback();
                 return Results.Ok();
             }
         }
@@ -561,6 +564,29 @@ app.MapDelete("recipes/delete-recipe/{id}", [Authorize] async (int id) =>
             {
                 recipeFetched.IsActive = false;
                 await adapter.SaveEntityAsync(recipeFetched);
+                // Removing the old values for the ingredients,instructions,categories.
+                await adapter.FetchEntityCollectionAsync(new()
+                {
+                    CollectionToFetch = recipeFetched.Ingredients,
+                    FilterToUse = IngredientFields.RecipeId == recipeFetched.Id
+                },
+                CancellationToken.None);
+                await adapter.DeleteEntityCollectionAsync(recipeFetched.Ingredients);
+                await adapter.FetchEntityCollectionAsync(new()
+                {
+                    CollectionToFetch = recipeFetched.Instructions,
+                    FilterToUse = InstructionFields.RecipeId == recipeFetched.Id
+                },
+                CancellationToken.None);
+                await adapter.DeleteEntityCollectionAsync(recipeFetched.Instructions);
+                await adapter.FetchEntityCollectionAsync(new()
+                {
+                    CollectionToFetch = recipeFetched.RecipeCategories,
+                    FilterToUse = RecipeCategoryFields.RecipeId == recipeFetched.Id
+                },
+                CancellationToken.None);
+                await adapter.DeleteEntityCollectionAsync(recipeFetched.RecipeCategories);
+
                 return Results.Ok("Successfuly deleted");
             }
         }
@@ -647,6 +673,7 @@ app.MapGet("/categories", [Authorize] async () =>
                     };
                     categoriesList.Add(category);
                 }
+                categoriesList.Sort((x, y) => string.Compare(x.Name, y.Name));
                 return Results.Ok(categoriesList);
             }
         }
