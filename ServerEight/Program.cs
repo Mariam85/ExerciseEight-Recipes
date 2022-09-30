@@ -13,7 +13,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi.Models;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
-
+using Microsoft.AspNetCore.Identity;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
 
 var builder = WebApplication.CreateBuilder();
 var securityScheme = new OpenApiSecurityScheme()
@@ -249,7 +252,13 @@ app.MapPost("/account/signup", [AllowAnonymous] async (string userName, string p
             }
             else
             {
-               // add the user.     
+                // add the user.
+                UserEntity userEntity = new();
+                PasswordHasher<string> pw = new();
+                userEntity.Username = userName;
+                userEntity.Password = pw.HashPassword(userName, password);
+                await adapter.SaveEntityAsync(userEntity);
+                return Results.Ok();
             }
         }
         catch (Exception e)
@@ -259,6 +268,120 @@ app.MapPost("/account/signup", [AllowAnonymous] async (string userName, string p
     }
 });
 
+// Refreshing the token.
+app.MapPost("token/refresh-token", async (string refreshToken) =>
+{
+    using (var adapter = new DataAccessAdapter(connectionString))
+    {
+        try
+        {
+            var metaData = new LinqMetaData(adapter);
+            UserEntity userFound = await metaData.User.FirstOrDefaultAsync(u => u.RefreshToken == refreshToken);
+            if (userFound is not null)
+            {
+                // Creating the token.
+                var secureKey = Encoding.UTF8.GetBytes(builder.Configuration["JWT:Key"]);
+                var securityKey = new SymmetricSecurityKey(secureKey);
+                var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha512);
+                var jwtTokenHandler = new JwtSecurityTokenHandler();
+                var tokenDescriptor = new SecurityTokenDescriptor
+                {
+                    Subject = new System.Security.Claims.ClaimsIdentity(new[]
+                    {
+                        new Claim(JwtRegisteredClaimNames.Name,userFound.Username)
+                    }),
+                    Expires = DateTime.Now.AddMinutes(20),
+                    SigningCredentials = credentials
+                };
+                var token = jwtTokenHandler.CreateToken(tokenDescriptor);
+                var jwtToken = jwtTokenHandler.WriteToken(token);
+                if (jwtToken != null)
+                {
+                    var refresh = RandomString(35);
+                    userFound.RefreshToken = refresh;
+                    try
+                    {
+                        await adapter.SaveEntityAsync(userFound);
+                        return Results.Ok(new { Token = jwtToken, Refresh = refresh });
+                    }
+                    catch
+                    {
+                        return Results.Unauthorized();
+                    }
+                }
+                else
+                {
+                    return Results.Unauthorized();
+                }
+            }
+            else
+            {
+                return Results.Unauthorized();
+            }
+        }
+        catch (Exception e)
+        {
+            return Results.BadRequest(e.Message);
+        }
+    }
+});
+
+// Login endpoint.
+app.MapPost("/account/login", [AllowAnonymous] async (string userName, string password) =>
+{
+    using (var adapter = new DataAccessAdapter(connectionString))
+    {
+        try
+        {
+            var metaData = new LinqMetaData(adapter);
+            UserEntity userFound = await metaData.User.FirstOrDefaultAsync(x => x.Username == userName);
+            // Checking if the user exists.
+            if (userFound is null)
+            {
+                return Results.BadRequest("This user does not exist.");
+            }
+
+            // Verifying the password.
+            PasswordHasher<string> pw = new();
+            if (pw.VerifyHashedPassword(userName, userFound.Password, password) != PasswordVerificationResult.Success)
+            {
+                return Results.BadRequest("The password entered is incorrect.");
+            }
+
+            // Creating the token.
+            var secureKey = Encoding.UTF8.GetBytes(builder.Configuration["JWT:Key"]);
+            var securityKey = new SymmetricSecurityKey(secureKey);
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha512);
+            var jwtTokenHandler = new JwtSecurityTokenHandler();
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new System.Security.Claims.ClaimsIdentity(new[]
+                {
+                    new Claim(JwtRegisteredClaimNames.Name,userFound.Username),
+                }),
+                Expires = DateTime.Now.AddMinutes(20),
+                SigningCredentials = credentials
+            };
+            var token = jwtTokenHandler.CreateToken(tokenDescriptor);
+            var jwtToken = jwtTokenHandler.WriteToken(token);
+            if (jwtToken != null)
+            {
+                var refresh = RandomString(35);
+                userFound.RefreshToken = refresh;
+                await adapter.SaveEntityAsync(userFound);
+                return Results.Ok(new { Token = jwtToken, Refresh = refresh });
+            }
+            else
+            {
+                return Results.Unauthorized();
+            }
+        }
+        catch (Exception e)
+        {
+            return Results.BadRequest(e.Message);
+        }
+    }
+});
 
 // Adding a recipe.
 app.MapPost("recipes/add-recipe", [Authorize] async (Recipe recipe) =>
@@ -277,7 +400,7 @@ app.MapPost("recipes/add-recipe", [Authorize] async (Recipe recipe) =>
             // Ingredients  to add to the ingredients table.
             var ingredientsCollection = new EntityCollection<IngredientEntity>();
             IngredientEntity ingredients = new();
-            foreach(var ingredient in recipe.Ingredients)
+            foreach (var ingredient in recipe.Ingredients)
             {
                 ingredients.RecipeId = newRecipe.Id;
                 ingredients.Component = ingredient;
