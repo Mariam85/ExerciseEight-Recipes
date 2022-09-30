@@ -8,25 +8,120 @@ using DBRecipes.HelperClasses;
 using DBRecipes;
 using SD.LLBLGen.Pro.LinqSupportClasses;
 using SD.LLBLGen.Pro.QuerySpec;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.OpenApi.Models;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
-var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+var builder = WebApplication.CreateBuilder();
+var securityScheme = new OpenApiSecurityScheme()
+{
+    Name = "Authorisation",
+    Type = SecuritySchemeType.ApiKey,
+    Scheme = "Bearer",
+    BearerFormat = "JWT",
+    In = ParameterLocation.Header,
+    Description = "JWT authentication for MinimalAPI"
+};
+
+var securityRequirements = new OpenApiSecurityRequirement()
+{
+    {
+        new OpenApiSecurityScheme
+        {
+            Reference = new OpenApiReference
+            {
+                Type= ReferenceType.SecurityScheme,
+                Id="Bearer"
+            }
+        },
+        new string[] {}
+    }
+};
+
+var contactInfo = new OpenApiContact()
+{
+    Name = "Mariam Mostafa",
+    Email = "mariammostafa.493@gmail.com",
+    Url = new Uri("https://github.com/Mariam85")
+};
+
+var license = new OpenApiLicense()
+{
+    Name = "Free License"
+};
+
+var info = new OpenApiInfo()
+{
+    Version = "V1",
+    Title = "Recipes Api with JWT Authentication",
+    Description = "Recipes Api with JWT Authentication",
+    Contact = contactInfo,
+    License = license
+};
 
 IConfiguration config = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json")
     .AddEnvironmentVariables()
     .Build();
+
+var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy =>
+    options.AddPolicy(name: MyAllowSpecificOrigins,
+                      policy =>
+                      {
+                          policy
+                              .WithOrigins(config["Client"])
+                              .AllowAnyHeader()
+                              .AllowAnyMethod()
+                              .WithExposedHeaders("IS-TOKEN-EXPIRED")
+                              .AllowCredentials();
+                      });
+});
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+}).AddJwtBearer(o =>
+{
+    var Key = Encoding.UTF8.GetBytes(builder.Configuration["JWT:Key"]);
+    o.SaveToken = true;
+    o.TokenValidationParameters = new TokenValidationParameters
     {
-        policy.AllowAnyOrigin()
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowAnyOrigin();
-    });
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = builder.Configuration["JWT:Issuer"],
+        ValidAudience = builder.Configuration["JWT:Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Key),
+        ClockSkew = TimeSpan.FromSeconds(0)
+    };
+    o.Events = new JwtBearerEvents
+    {
+
+        OnAuthenticationFailed = context =>
+        {
+            if (context.Exception.GetType() == typeof(SecurityTokenExpiredException))
+            {
+                context.Response.Headers.Add("IS-TOKEN-EXPIRED", "true");
+            }
+            return Task.CompletedTask;
+        }
+    };
+});
+builder.Services.AddAuthorization();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", info);
+    options.AddSecurityDefinition("Bearer", securityScheme);
+    options.AddSecurityRequirement(securityRequirements);
 });
 
 var connectionString = config["ConnectionString"];
@@ -36,15 +131,322 @@ RuntimeConfiguration.ConfigureDQE<PostgreSqlDQEConfiguration>(c =>
     c.AddDbProviderFactory(typeof(NpgsqlFactory));
     c.SetTraceLevel(System.Diagnostics.TraceLevel.Verbose);
 });
-var app = builder.Build();
 
+WebApplication app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
+app.UseHttpsRedirection();
+app.UseCors(MyAllowSpecificOrigins);
+app.UseAuthentication();
+app.UseAuthorization();
 
-app.UseSwaggerUI(options =>
+// Generating a random string for the refresh token.
+string RandomString(int length)
 {
-    options.SwaggerEndpoint("/swagger/v1/swagger.json", "v1");
-    options.RoutePrefix = string.Empty;
+    var random = new Random();
+    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    return new string(Enumerable.Repeat(chars, length).Select(x => x[random.Next(x.Length)]).ToArray());
+}
+
+// Validating the password.
+bool ValidatePassword(string password)
+{
+    int validConditions = 0;
+    foreach (char c in password)
+    {
+        if (c >= 'a' && c <= 'z')
+        {
+            validConditions++;
+            break;
+        }
+    }
+    foreach (char c in password)
+    {
+        if (c >= 'A' && c <= 'Z')
+        {
+            validConditions++;
+            break;
+        }
+    }
+    if (validConditions == 0) return false;
+    foreach (char c in password)
+    {
+        if (c >= '0' && c <= '9')
+        {
+            validConditions++;
+            break;
+        }
+    }
+    if (validConditions == 1) return false;
+    if (validConditions == 2)
+    {
+        char[] special = { '@', '#', '$', '%', '^', '&', '+', '=' };
+        if (password.IndexOfAny(special) == -1) return false;
+    }
+    return true;
+}
+
+// Validating the username.
+bool ValidateUsername(string username)
+{
+    if (username.Length > 30 || username.Length < 8)
+    {
+        return false;
+    }
+    int validConditions = 0;
+    // Checking that at least 1 letter exists. 
+    foreach (char c in username)
+    {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+        {
+            validConditions++;
+            break;
+        }
+    }
+    if (validConditions == 0)
+    {
+        return false;
+    }
+    // Checking that at least 1 number exists. 
+    foreach (char c in username)
+    {
+        if (c >= '0' && c <= '9')
+        {
+            validConditions++;
+            break;
+        }
+    }
+    if (validConditions <= 1)
+    {
+        return false;
+    }
+    else
+    {
+        return true;
+    }
+}
+
+// Signing up endpoint.
+app.MapPost("/account/signup", [AllowAnonymous] async (string userName, string password) =>
+{
+    using (var adapter = new DataAccessAdapter(connectionString))
+    {
+        try
+        {
+            var metaData = new LinqMetaData(adapter);
+            var usersList = await metaData.User.ToListAsync();
+            if (usersList.Find((x) => x.Username == userName) != null)
+            {
+                return Results.BadRequest("Username already exists");
+            }
+            else if (String.IsNullOrEmpty(userName) || ValidateUsername(userName) == false)
+            {
+                return Results.BadRequest("Username is invalid");
+            }
+            else if (String.IsNullOrEmpty(password) || ValidatePassword(password) == false)
+            {
+                return Results.BadRequest("Password is invalid");
+            }
+            else
+            {
+               // add the user.     
+            }
+        }
+        catch (Exception e)
+        {
+            return Results.BadRequest(e.Message);
+        }
+    }
+});
+
+
+// Adding a recipe.
+app.MapPost("recipes/add-recipe", [Authorize] async (Recipe recipe) =>
+{
+    using (var adapter = new DataAccessAdapter(connectionString))
+    {
+        try
+        {
+            // Creating the recipe to add to the recipe table.
+            var metaData = new LinqMetaData(adapter);
+            RecipeEntity newRecipe = new();
+            newRecipe.IsActive = true;
+            newRecipe.Title = recipe.Title;
+            adapter.SaveEntity(newRecipe);
+
+            // Ingredients  to add to the ingredients table.
+            var ingredientsCollection = new EntityCollection<IngredientEntity>();
+            IngredientEntity ingredients = new();
+            foreach(var ingredient in recipe.Ingredients)
+            {
+                ingredients.RecipeId = newRecipe.Id;
+                ingredients.Component = ingredient;
+                ingredientsCollection.Add(ingredients);
+            }
+
+            // Instructions to add to the instructions table.
+            var instructionsCollection = new EntityCollection<InstructionEntity>();
+            InstructionEntity instructions = new();
+            foreach (var instruction in recipe.Instructions)
+            {
+                instructions.RecipeId = newRecipe.Id;
+                instructions.Step = instruction;
+                instructionsCollection.Add(instructions);
+            }
+
+            // Categories to add to the recipe_category table.
+            var categoryCollection = new EntityCollection<RecipeCategoryEntity>();
+            RecipeCategoryEntity categories = new();
+            foreach (var category in recipe.Categories)
+            {
+                categories.RecipeId = newRecipe.Id;
+                categories.CategoryName = category;
+                categoryCollection.Add(categories);
+            }
+            await adapter.SaveEntityCollectionAsync(ingredientsCollection);
+            await adapter.SaveEntityCollectionAsync(instructionsCollection);
+            await adapter.SaveEntityCollectionAsync(categoryCollection);
+
+            return Results.Created("Successfully added a recipe", recipe);
+        }
+        catch (Exception e)
+        {
+            return Results.BadRequest(e.Message);
+        }
+    }
+
+});
+
+// Editing a recipe.
+app.MapPut("recipes/edit-recipe/{id}", [Authorize] async (int id, Recipe editedRecipe) =>
+{
+    //search for recipe if not found,therefore return return Results.BadRequest();....
+    using (var adapter = new DataAccessAdapter(connectionString))
+    {
+        try
+        {
+            var metaData = new LinqMetaData(adapter);
+            // Search for the recipe with this id and update the title.
+            RecipeEntity recipeFound = await metaData.Recipe.FirstOrDefaultAsync(x => x.Id == id);
+            if (recipeFound is null)
+            {
+                return Results.BadRequest();
+            }
+            else
+            {
+                recipeFound.Title = editedRecipe.Title;
+                await adapter.SaveEntityAsync(recipeFound);
+
+                // Removing the old values for the ingredients,instructions,categories.
+                await adapter.FetchEntityCollectionAsync(new()
+                {
+                    CollectionToFetch = recipeFound.Ingredients,
+                    FilterToUse = IngredientFields.RecipeId == editedRecipe.Id
+                },
+                CancellationToken.None);
+                await adapter.DeleteEntityCollectionAsync(recipeFound.Ingredients);
+                await adapter.FetchEntityCollectionAsync(new()
+                {
+                    CollectionToFetch = recipeFound.Instructions,
+                    FilterToUse = InstructionFields.RecipeId == editedRecipe.Id
+                },
+                CancellationToken.None);
+                await adapter.DeleteEntityCollectionAsync(recipeFound.Instructions);
+                await adapter.FetchEntityCollectionAsync(new()
+                {
+                    CollectionToFetch = recipeFound.RecipeCategories,
+                    FilterToUse = RecipeCategoryFields.RecipeId == editedRecipe.Id
+                },
+                CancellationToken.None);
+                await adapter.DeleteEntityCollectionAsync(recipeFound.RecipeCategories);
+
+                // Adding the new fields for the recipe.
+                // Ingredients  to add to the ingredients table.
+                var ingredientsCollection = new EntityCollection<IngredientEntity>();
+                IngredientEntity ingredients = new();
+                foreach (var ingredient in editedRecipe.Ingredients)
+                {
+                    ingredients.RecipeId = recipeFound.Id;
+                    ingredients.Component = ingredient;
+                    ingredientsCollection.Add(ingredients);
+                }
+
+                // Instructions to add to the instructions table.
+                var instructionsCollection = new EntityCollection<InstructionEntity>();
+                InstructionEntity instructions = new();
+                foreach (var instruction in editedRecipe.Instructions)
+                {
+                    instructions.RecipeId = recipeFound.Id;
+                    instructions.Step = instruction;
+                    instructionsCollection.Add(instructions);
+                }
+
+                // Categories to add to the recipe_category table.
+                var categoryCollection = new EntityCollection<RecipeCategoryEntity>();
+                RecipeCategoryEntity categories = new();
+                foreach (var category in editedRecipe.Categories)
+                {
+                    categories.RecipeId = recipeFound.Id;
+                    categories.CategoryName = category;
+                    categoryCollection.Add(categories);
+                }
+                await adapter.SaveEntityCollectionAsync(ingredientsCollection);
+                await adapter.SaveEntityCollectionAsync(instructionsCollection);
+                await adapter.SaveEntityCollectionAsync(categoryCollection);
+                return Results.Ok();
+            }
+        }
+        catch (Exception e)
+        {
+            return Results.BadRequest(e.Message);
+        }
+    }
+});
+
+// List all recipes.
+app.MapGet("/recipes", [Authorize] async () =>
+{
+    var recipesList = await GetRecipes();
+    return Results.Ok(recipesList);
+});
+
+// Listing a recipe.
+app.MapGet("recipes/list-recipe/{id}", [Authorize] async (int id) =>
+{
+    var recipesList = await GetRecipes();
+    var foundRecipe = recipesList.Find(r => r.Id == id);
+    if (foundRecipe == null)
+        return Results.NotFound();
+    else
+        return Results.Ok(foundRecipe);
+});
+
+// Deleting a recipe.
+app.MapDelete("recipes/delete-recipe/{id}", [Authorize] async (int id) =>
+{
+    using (var adapter = new DataAccessAdapter(connectionString))
+    {
+        try
+        {
+            var metaData = new LinqMetaData(adapter);
+            RecipeEntity recipeFetched = await metaData.Recipe.FirstOrDefaultAsync(x => x.Id == id);
+            if (recipeFetched is null)
+            {
+                return Results.BadRequest("This recipe does not exist.");
+            }
+            else
+            {
+                recipeFetched.IsActive = false;
+                await adapter.SaveEntityAsync(recipeFetched);
+                return Results.Ok("Successfuly deleted");
+            }
+        }
+        catch (Exception e)
+        {
+            app.Logger.LogError(e.Message);
+            return Results.BadRequest(e.Message);
+        }
+    }
 });
 
 // Getting recipes from the database.
@@ -101,7 +503,7 @@ static async Task<List<Recipe>> GetRecipes()
 }
 
 // List all categories.  
-app.MapGet("/categories", async () =>
+app.MapGet("/categories", [Authorize] async () =>
 {
     using (var adapter = new DataAccessAdapter(connectionString))
     {
@@ -134,7 +536,7 @@ app.MapGet("/categories", async () =>
 });
 
 // Deleting a category.
-app.MapDelete("recipes/remove-category/{category}", async (string category) =>
+app.MapDelete("recipes/remove-category/{category}", [Authorize] async (string category) =>
 {
     using (var adapter = new DataAccessAdapter(connectionString))
     {
@@ -196,54 +598,8 @@ app.MapDelete("recipes/remove-category/{category}", async (string category) =>
     }
 });
 
-// List all recipes.
-app.MapGet("/recipes", async () =>
-{
-    var recipesList = await GetRecipes();
-    return Results.Ok(recipesList);
-});
-
-// Listing a recipe.
-app.MapGet("recipes/list-recipe/{id}", async (int id) =>
-{
-    var recipesList = await GetRecipes();
-    var foundRecipe = recipesList.Find(r => r.Id == id);
-    if (foundRecipe == null)
-        return Results.NotFound();
-    else
-        return Results.Ok(foundRecipe);
-});
-
-// Deleting a recipe.
-app.MapDelete("recipes/delete-recipe/{id}", async (int id) =>
-{
-    using (var adapter = new DataAccessAdapter(connectionString))
-    {
-        try
-        {
-            var metaData = new LinqMetaData(adapter);
-            RecipeEntity recipeFetched = await metaData.Recipe.FirstOrDefaultAsync(x => x.Id == id);
-            if (recipeFetched is null)
-            {
-                return Results.BadRequest("This recipe does not exist.");
-            }
-            else
-            {
-                recipeFetched.IsActive = false;
-                await adapter.SaveEntityAsync(recipeFetched);
-                return Results.Ok("Successfuly deleted");
-            }
-        }
-        catch (Exception e)
-        {
-            app.Logger.LogError(e.Message);
-            return Results.BadRequest(e.Message);
-        }
-    }
-});
-
 // Adding a category.
-app.MapPost("recipes/add-category", async (Categories category) =>
+app.MapPost("recipes/add-category", [Authorize] async (Categories category) =>
 {
     using (var adapter = new DataAccessAdapter(connectionString))
     {
@@ -285,7 +641,7 @@ app.MapPost("recipes/add-category", async (Categories category) =>
 });
 
 // Renaming a category.
-app.MapPut("categories/rename-category", async (string oldName, string newName) =>
+app.MapPut("categories/rename-category", [Authorize] async (string oldName, string newName) =>
 {
     using (var adapter = new DataAccessAdapter(connectionString))
     {
