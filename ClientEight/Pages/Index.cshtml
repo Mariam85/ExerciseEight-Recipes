@@ -919,7 +919,10 @@
                 text: 'successfuly deleted!',
                 icon: 'success',
                 confirmButtonColor: '#0275d8'
-            })
+            }).then(
+              function () {
+                   document.location.reload();
+              });
         }
         else if (response.headers.get('is-token-expired')) {
             await refresh("k");
@@ -953,7 +956,10 @@
                 icon: 'success',
                 confirmButtonColor: '#0275d8'
 
-            });
+            }).then(
+                function () {
+                    document.location.reload();
+                });
             Alpine.store('cat', getCategories());
             Alpine.store('recipes', getRecipes());
         }
